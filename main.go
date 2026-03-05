@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -117,37 +116,93 @@ func (c *catalog) refresh() (bool, error) {
 
 func discoverSpecs(root string) ([]spec, error) {
 	var out []spec
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
-		if walkErr != nil {
+	err := walkSpecTree(root, ".", make(map[string]int), &out)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func walkSpecTree(root, relDir string, stack map[string]int, out *[]spec) error {
+	dirPath := root
+	if relDir != "." {
+		dirPath = filepath.Join(root, relDir)
+	}
+
+	realDir, err := filepath.EvalSymlinks(dirPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		if d.IsDir() {
-			name := d.Name()
-			if name == ".git" || name == "node_modules" || name == "vendor" || strings.HasPrefix(name, ".") {
-				return fs.SkipDir
+		return err
+	}
+
+	realDir = filepath.Clean(realDir)
+	if stack[realDir] > 0 {
+		return nil
+	}
+	stack[realDir]++
+	defer func() {
+		stack[realDir]--
+		if stack[realDir] == 0 {
+			delete(stack, realDir)
+		}
+	}()
+
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return nil
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		relPath := name
+		if relDir != "." {
+			relPath = filepath.Join(relDir, name)
+		}
+		path := filepath.Join(root, relPath)
+
+		if entry.IsDir() {
+			if shouldSkipDir(name) {
+				continue
 			}
-			return nil
+			if err := walkSpecTree(root, relPath, stack, out); err != nil {
+				return err
+			}
+			continue
 		}
 
-		if d.Name() != "openapi.yaml" {
-			return nil
+		var info os.FileInfo
+		if entry.Type()&os.ModeSymlink != 0 {
+			info, err = os.Stat(path)
+		} else {
+			info, err = entry.Info()
 		}
-
-		slashed := filepath.ToSlash(path)
-		if !strings.HasSuffix(slashed, openAPIRelativeSuffix) {
-			return nil
-		}
-
-		info, err := d.Info()
 		if err != nil {
-			return nil
+			continue
 		}
 
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return nil
+		if info.IsDir() {
+			if shouldSkipDir(name) {
+				continue
+			}
+			if err := walkSpecTree(root, relPath, stack, out); err != nil {
+				return err
+			}
+			continue
 		}
-		relSlash := filepath.ToSlash(rel)
+
+		if name != "openapi.yaml" {
+			continue
+		}
+
+		relSlash := filepath.ToSlash(relPath)
+		if !strings.HasSuffix(relSlash, openAPIRelativeSuffix) {
+			continue
+		}
 
 		service := strings.TrimSuffix(relSlash, openAPIRelativeSuffix)
 		service = strings.Trim(service, "/")
@@ -159,7 +214,7 @@ func discoverSpecs(root string) ([]spec, error) {
 		sum := sha1.Sum([]byte(relSlash))
 		id := fmt.Sprintf("%s-%s", idPrefix, hex.EncodeToString(sum[:4]))
 
-		out = append(out, spec{
+		*out = append(*out, spec{
 			ID:       id,
 			Name:     service,
 			URL:      "/openapi/spec/" + url.PathEscape(id),
@@ -167,12 +222,13 @@ func discoverSpecs(root string) ([]spec, error) {
 			Size:     info.Size(),
 			Modified: info.ModTime().UnixNano(),
 		})
-		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
-	return out, nil
+
+	return nil
+}
+
+func shouldSkipDir(name string) bool {
+	return name == ".git" || name == "node_modules" || name == "vendor" || strings.HasPrefix(name, ".")
 }
 
 func sanitizeID(v string) string {
@@ -259,7 +315,7 @@ func main() {
 		log.Fatalf("initial refresh: %v", err)
 	}
 	if changed {
-		log.Printf("loaded specs: %d", len(catalog.snapshot().Items))
+		logSpecPaths(root, catalog.snapshot().Items)
 	}
 
 	hub := newSSEHub()
@@ -388,7 +444,7 @@ func runWatcher(ctx context.Context, c *catalog, hub *sseHub, interval time.Dura
 			continue
 		}
 		m := c.snapshot()
-		log.Printf("spec catalog changed: %d specs, rev=%s", len(m.Items), shortSHA(m.Revision))
+		logSpecPaths(c.root, m.Items)
 
 		data, _ := json.Marshal(map[string]string{
 			"revision": m.Revision,
@@ -400,11 +456,10 @@ func runWatcher(ctx context.Context, c *catalog, hub *sseHub, interval time.Dura
 	}
 }
 
-func shortSHA(s string) string {
-	if len(s) <= 8 {
-		return s
+func logSpecPaths(root string, items []spec) {
+	for _, item := range items {
+		log.Printf("%s", filepath.Join(root, filepath.FromSlash(item.Source)))
 	}
-	return s[:8]
 }
 
 func getEnv(key, fallback string) string {
