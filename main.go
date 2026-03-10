@@ -489,10 +489,16 @@ const docsPage = `<!doctype html>
     }
     html, body {
       margin: 0;
-      background: linear-gradient(145deg, #eef3ee 0%, #f9fbf8 55%, #eef2ec 100%);
+      background: #ffffff;
       color: var(--text);
       font-family: "IBM Plex Sans", "Segoe UI", Tahoma, sans-serif;
       min-height: 100%;
+    }
+    body.theme-dark {
+      color: #e5edf7;
+    }
+    body.theme-light {
+      color: var(--text);
     }
     .swagger-ui .topbar {
       --topbar-fg: var(--text);
@@ -670,7 +676,12 @@ const docsPage = `<!doctype html>
       const topbar = document.querySelector("#swagger-ui .topbar");
       if (!topbar) return false;
       const backgroundColor = getComputedStyle(topbar).backgroundColor;
-      topbar.classList.toggle("is-dark", isDarkBackground(backgroundColor));
+      const dark = isDarkBackground(backgroundColor);
+      topbar.classList.toggle("is-dark", dark);
+      document.body.classList.toggle("theme-dark", dark);
+      document.body.classList.toggle("theme-light", !dark);
+      document.body.style.background = dark ? backgroundColor : "#ffffff";
+      document.documentElement.style.background = dark ? backgroundColor : "#ffffff";
       return true;
     }
 
