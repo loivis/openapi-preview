@@ -494,43 +494,75 @@ const docsPage = `<!doctype html>
       font-family: "IBM Plex Sans", "Segoe UI", Tahoma, sans-serif;
       min-height: 100%;
     }
-    .topbar {
+    .swagger-ui .topbar {
       position: sticky;
       top: 0;
       z-index: 1000;
       isolation: isolate;
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      padding: 10px 14px;
       border-bottom: 1px solid var(--line);
       backdrop-filter: blur(6px);
       background: rgba(245, 247, 244, 0.88);
     }
-    .title {
-      font-weight: 700;
-      letter-spacing: 0.2px;
+    .swagger-ui .topbar .wrapper {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      max-width: 1200px;
+      padding-left: 14px;
+      padding-right: 14px;
     }
-    .meta {
+    .topbar-meta {
       margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .topbar-meta-text {
       color: var(--muted);
       font-size: 13px;
     }
-    .pill {
-      display: inline-block;
-      border: 1px solid var(--line);
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
       border-radius: 999px;
-      padding: 2px 8px;
-      background: var(--panel);
+      padding: 4px 10px;
+      background: rgba(15, 23, 42, 0.72);
+      color: #e5edf7;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
     }
-    .warn {
-      color: #915b00;
+    .status-pill::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #94a3b8;
+      box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+      flex: 0 0 auto;
+    }
+    .status-pill.connected {
+      border-color: rgba(52, 211, 153, 0.28);
+      background: rgba(6, 78, 59, 0.78);
+      color: #d1fae5;
+    }
+    .status-pill.connected::before {
+      background: #34d399;
+      box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+    }
+    .status-pill.warn {
+      border-color: rgba(251, 191, 36, 0.3);
+      background: rgba(120, 53, 15, 0.82);
+      color: #fef3c7;
+    }
+    .status-pill.warn::before {
+      background: #fbbf24;
+      box-shadow: 0 0 0 3px rgba(251, 191, 36, 0.18);
     }
     #swagger-ui {
-      position: relative;
-      z-index: 0;
-      max-width: 1200px;
-      margin: 0 auto;
       padding-bottom: 28px;
     }
     .empty {
@@ -544,11 +576,6 @@ const docsPage = `<!doctype html>
   </style>
 </head>
 <body>
-  <div class="topbar">
-    <div class="title">Local OpenAPI Docs</div>
-    <div class="pill" id="status">loading...</div>
-    <div class="meta" id="meta"></div>
-  </div>
   <div id="swagger-ui"></div>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
   <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-standalone-preset.js"></script>
@@ -556,12 +583,61 @@ const docsPage = `<!doctype html>
     let ui = null;
     let currentRevision = "";
     let selectedName = "";
-    const statusEl = document.getElementById("status");
-    const metaEl = document.getElementById("meta");
+    let statusText = "loading...";
+    let statusWarn = false;
+    let metaText = "";
+
+    function ensureTopbarMeta() {
+      const topbar = document.querySelector("#swagger-ui .topbar");
+      if (!topbar) return null;
+
+      let meta = topbar.querySelector(".topbar-meta");
+      if (!meta) {
+        meta = document.createElement("div");
+        meta.className = "topbar-meta";
+
+        const pill = document.createElement("span");
+        pill.className = "status-pill";
+        meta.appendChild(pill);
+
+        const text = document.createElement("span");
+        text.className = "topbar-meta-text";
+        meta.appendChild(text);
+
+        const host = topbar.querySelector(".wrapper") || topbar;
+        host.appendChild(meta);
+      }
+
+      return meta;
+    }
+
+    function syncTopbarMeta() {
+      const meta = ensureTopbarMeta();
+      if (!meta) return false;
+
+      const pill = meta.querySelector(".status-pill");
+      const text = meta.querySelector(".topbar-meta-text");
+      pill.textContent = statusText;
+      pill.classList.toggle("warn", statusWarn);
+      pill.classList.toggle("connected", !statusWarn && statusText === "connected");
+      text.textContent = metaText;
+      return true;
+    }
+
+    function scheduleTopbarSync(attempt = 0) {
+      if (syncTopbarMeta() || attempt >= 12) return;
+      requestAnimationFrame(() => scheduleTopbarSync(attempt + 1));
+    }
 
     function setStatus(text, warn = false) {
-      statusEl.textContent = text;
-      statusEl.classList.toggle("warn", warn);
+      statusText = text;
+      statusWarn = warn;
+      syncTopbarMeta();
+    }
+
+    function setMeta(text) {
+      metaText = text;
+      syncTopbarMeta();
     }
 
     async function fetchManifest() {
@@ -579,7 +655,7 @@ const docsPage = `<!doctype html>
       if (!m.items || !m.items.length) {
         renderEmpty("No specs found under ../**/docs/oas/openapi.yaml");
         setStatus("no specs", true);
-        metaEl.textContent = "Search root is configured server-side.";
+        setMeta("Search root is configured server-side.");
         return;
       }
 
@@ -606,8 +682,9 @@ const docsPage = `<!doctype html>
         persistAuthorization: true
       });
 
+      scheduleTopbarSync();
       setStatus("connected");
-      metaEl.textContent = "Specs: " + m.items.length + " - rev " + m.revision.slice(0, 8);
+      setMeta("Specs: " + m.items.length + " - rev " + m.revision.slice(0, 8));
     }
 
     async function rerender() {
