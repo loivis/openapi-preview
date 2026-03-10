@@ -495,6 +495,12 @@ const docsPage = `<!doctype html>
       min-height: 100%;
     }
     .swagger-ui .topbar {
+      --topbar-fg: var(--text);
+      --topbar-muted: var(--muted);
+      --topbar-logo: #111827;
+      --topbar-logo-filter: brightness(0) saturate(100%);
+      --topbar-input-bg: rgba(255, 255, 255, 0.78);
+      --topbar-input-border: rgba(31, 45, 34, 0.16);
       position: sticky;
       top: 0;
       z-index: 1000;
@@ -503,11 +509,71 @@ const docsPage = `<!doctype html>
       backdrop-filter: blur(6px);
       background: rgba(245, 247, 244, 0.88);
     }
+    .swagger-ui .topbar.is-dark {
+      --topbar-fg: #e5edf7;
+      --topbar-muted: #cbd5e1;
+      --topbar-logo: #ffffff;
+      --topbar-logo-filter: brightness(0) invert(1);
+      --topbar-input-bg: rgba(15, 23, 42, 0.56);
+      --topbar-input-border: rgba(226, 232, 240, 0.18);
+    }
+    .swagger-ui .topbar,
+    .swagger-ui .topbar a,
+    .swagger-ui .topbar span,
+    .swagger-ui .topbar label,
+    .swagger-ui .topbar button,
+    .swagger-ui .topbar input,
+    .swagger-ui .topbar select,
+    .swagger-ui .topbar option {
+      color: var(--topbar-fg) !important;
+    }
+    .swagger-ui .topbar .link span,
+    .swagger-ui .topbar .download-url-wrapper .select-label span {
+      color: var(--topbar-fg) !important;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .swagger-ui .topbar .download-url-wrapper,
+    .swagger-ui .topbar .download-url-wrapper .select-label {
+      flex-wrap: nowrap;
+      white-space: nowrap;
+    }
+    .swagger-ui .topbar input,
+    .swagger-ui .topbar select,
+    .swagger-ui .topbar .download-url-wrapper input[type="text"] {
+      border-color: var(--topbar-input-border) !important;
+      background: var(--topbar-input-bg) !important;
+    }
+    .swagger-ui .topbar svg,
+    .swagger-ui .topbar svg path,
+    .swagger-ui .topbar svg polygon {
+      fill: currentColor !important;
+    }
+    .swagger-ui .topbar .link svg,
+    .swagger-ui .topbar .link svg path,
+    .swagger-ui .topbar .link svg polygon {
+      fill: var(--topbar-logo) !important;
+    }
+    .swagger-ui .topbar .link img {
+      filter: var(--topbar-logo-filter);
+    }
+    .swagger-ui .topbar .link {
+      display: none !important;
+    }
+    .swagger-ui .topbar .link img,
+    .swagger-ui .topbar .link svg {
+      display: none !important;
+    }
     .swagger-ui .topbar .wrapper {
       display: flex;
       align-items: center;
+      flex-wrap: nowrap;
       gap: 12px;
-      max-width: 1200px;
+      width: 100%;
+      max-width: none;
+      margin: 0;
+      box-sizing: border-box;
       padding-left: 14px;
       padding-right: 14px;
     }
@@ -518,7 +584,7 @@ const docsPage = `<!doctype html>
       gap: 12px;
     }
     .topbar-meta-text {
-      color: var(--muted);
+      color: var(--topbar-muted) !important;
       font-size: 13px;
     }
     .status-pill {
@@ -587,6 +653,27 @@ const docsPage = `<!doctype html>
     let statusWarn = false;
     let metaText = "";
 
+    function parseRGB(value) {
+      const match = value && value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+      if (!match) return null;
+      return [Number(match[1]), Number(match[2]), Number(match[3])];
+    }
+
+    function isDarkBackground(value) {
+      const rgb = parseRGB(value);
+      if (!rgb) return false;
+      const luminance = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+      return luminance < 0.5;
+    }
+
+    function syncTopbarTheme() {
+      const topbar = document.querySelector("#swagger-ui .topbar");
+      if (!topbar) return false;
+      const backgroundColor = getComputedStyle(topbar).backgroundColor;
+      topbar.classList.toggle("is-dark", isDarkBackground(backgroundColor));
+      return true;
+    }
+
     function ensureTopbarMeta() {
       const topbar = document.querySelector("#swagger-ui .topbar");
       if (!topbar) return null;
@@ -625,18 +712,27 @@ const docsPage = `<!doctype html>
     }
 
     function scheduleTopbarSync(attempt = 0) {
-      if (syncTopbarMeta() || attempt >= 12) return;
+      const ready = syncTopbarTheme() && syncTopbarMeta();
+      if (ready || attempt >= 12) return;
       requestAnimationFrame(() => scheduleTopbarSync(attempt + 1));
+    }
+
+    function installTopbarThemeSync() {
+      const syncSoon = () => requestAnimationFrame(() => scheduleTopbarSync());
+      document.addEventListener("click", syncSoon, true);
+      document.addEventListener("change", syncSoon, true);
     }
 
     function setStatus(text, warn = false) {
       statusText = text;
       statusWarn = warn;
+      syncTopbarTheme();
       syncTopbarMeta();
     }
 
     function setMeta(text) {
       metaText = text;
+      syncTopbarTheme();
       syncTopbarMeta();
     }
 
@@ -699,6 +795,7 @@ const docsPage = `<!doctype html>
     }
 
     async function init() {
+      installTopbarThemeSync();
       await rerender();
       const es = new EventSource("/openapi/events");
 
