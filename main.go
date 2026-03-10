@@ -497,7 +497,8 @@ const docsPage = `<!doctype html>
     .topbar {
       position: sticky;
       top: 0;
-      z-index: 2;
+      z-index: 1000;
+      isolation: isolate;
       display: flex;
       gap: 12px;
       align-items: center;
@@ -526,6 +527,8 @@ const docsPage = `<!doctype html>
       color: #915b00;
     }
     #swagger-ui {
+      position: relative;
+      z-index: 0;
       max-width: 1200px;
       margin: 0 auto;
       padding-bottom: 28px;
